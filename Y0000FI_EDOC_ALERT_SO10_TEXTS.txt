@@ -1,17 +1,18 @@
-Standard text (SO10) used by report Y0000FI_EDOC_ALERT as the e-mail
-subject and body
+Standard texts (SO10) used by report Y0000FI_EDOC_ALERT
 ==========================================================================
-Text name : Y0000FI_EDOC_ALERT_BODY
+Text names: Y0000FI_EDOC_ALERT_SUBJECT  e-mail subject (one line)
+            Y0000FI_EDOC_ALERT_BODY     e-mail body
 Text ID   : ST
+Creation  : report Y0000FI_EDOC_ALERT_SO10 creates both texts (built-in
+            English text, or local .txt files for other languages)
 Language  : one version per language (EN, FR, ...) - chosen on the
             selection screen with P_LANGU
 Transport : SO10 does not ask for a transport request; use report
             RSTXTRAN to put the text in a request.
 
 Subject
-  First line starting with "Subject:" = e-mail subject (that line and the
-  blank lines after it are not part of the body). Without that line the
-  report uses its default subject
+  Text Y0000FI_EDOC_ALERT_SUBJECT (all its lines form one subject). If it
+  does not exist in the language, the report uses its default subject
   "Action Required - eDocument Transmission Errors from Previous Day".
 
 Placeholder
@@ -29,8 +30,10 @@ Formatting (column on the left in the SO10 line editor)
 Content in English - text from the tab "Error Notification Email"
 (Excel, 20.10), plus the separator, the list and the ticket link
 ----------------------------------------------------------------
-* Subject: Action Required - eDocument Transmission Errors from Previous Day
-*
+Y0000FI_EDOC_ALERT_SUBJECT
+* Action Required - eDocument Transmission Errors from Previous Day
+
+Y0000FI_EDOC_ALERT_BODY
 * Dear Team,
 *
 * Please find attached the error report for the eDocuments processed on the previous day.

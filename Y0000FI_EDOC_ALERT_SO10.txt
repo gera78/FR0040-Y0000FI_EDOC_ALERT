@@ -1,0 +1,366 @@
+REPORT y0000fi_edoc_alert_so10.
+
+*---------------------------------------------------------------------*
+* Creates / updates the SO10 standard texts used by Y0000FI_EDOC_ALERT
+*   Y0000FI_EDOC_ALERT_SUBJECT  e-mail subject (one line)
+*   Y0000FI_EDOC_ALERT_BODY     e-mail body (with &EDOC_LIST&)
+* Text object TEXT, text ID ST, language P_LANGU.
+*
+* Content:
+*   - built-in English text (from the Excel "Error Notification Email"),
+*   - or local .txt files (UTF-8, one line per line) - e.g. French text.
+*
+* Test run (default) only shows what would be saved.
+* SO10 texts are not recorded in a transport request automatically:
+* afterwards use report RSTXTRAN, or run this program in each system.
+*---------------------------------------------------------------------*
+
+CONSTANTS:
+  c_text_subj TYPE tdobname VALUE 'Y0000FI_EDOC_ALERT_SUBJECT',
+  c_text_body TYPE tdobname VALUE 'Y0000FI_EDOC_ALERT_BODY',
+  c_text_id   TYPE tdid     VALUE 'ST',
+  c_text_obj  TYPE tdobject VALUE 'TEXT',
+  c_line_len  TYPE i        VALUE 132.
+
+*---------------------------------------------------------------------*
+* Selection Screen
+*---------------------------------------------------------------------*
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+  PARAMETERS: p_langu TYPE spras DEFAULT 'E' OBLIGATORY,
+              p_subj  AS CHECKBOX DEFAULT 'X',
+              p_body  AS CHECKBOX DEFAULT 'X'.
+SELECTION-SCREEN END OF BLOCK b1.
+
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
+  PARAMETERS: r_def  RADIOBUTTON GROUP src DEFAULT 'X' USER-COMMAND src,
+              r_file RADIOBUTTON GROUP src,
+              p_fsubj TYPE localfile MODIF ID fil,
+              p_fbody TYPE localfile MODIF ID fil.
+SELECTION-SCREEN END OF BLOCK b2.
+
+SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE TEXT-003.
+  PARAMETERS: p_overw AS CHECKBOX DEFAULT ' ',
+              p_test  AS CHECKBOX DEFAULT 'X'.
+SELECTION-SCREEN END OF BLOCK b3.
+
+*---------------------------------------------------------------------*
+* Selection screen events
+*---------------------------------------------------------------------*
+AT SELECTION-SCREEN OUTPUT.
+
+  " File fields only when the source is "local files"
+  LOOP AT SCREEN.
+    IF screen-group1 = 'FIL'.
+      screen-input = COND #( WHEN r_file = abap_true THEN 1 ELSE 0 ).
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_fsubj.
+  PERFORM f4_file CHANGING p_fsubj.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_fbody.
+  PERFORM f4_file CHANGING p_fbody.
+
+AT SELECTION-SCREEN.
+
+  IF sy-ucomm = 'SRC'.
+    RETURN.
+  ENDIF.
+
+  IF p_subj = abap_false AND p_body = abap_false.
+    MESSAGE 'Select at least one text (subject or body)' TYPE 'E'.
+  ENDIF.
+
+  IF r_file = abap_true.
+    IF sy-batch = abap_true.
+      MESSAGE 'Local files can only be read online' TYPE 'E'.
+    ENDIF.
+    IF p_subj = abap_true AND p_fsubj IS INITIAL.
+      MESSAGE 'Enter the file for the subject text' TYPE 'E'.
+    ENDIF.
+    IF p_body = abap_true AND p_fbody IS INITIAL.
+      MESSAGE 'Enter the file for the body text' TYPE 'E'.
+    ENDIF.
+  ENDIF.
+
+*---------------------------------------------------------------------*
+* Start of Selection
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+
+  DATA lt_text TYPE string_table.
+
+  IF p_test = abap_true.
+    WRITE: / 'TEST RUN - nothing is saved' COLOR COL_NEGATIVE.
+    ULINE.
+  ENDIF.
+
+  IF p_subj = abap_true.
+    CLEAR lt_text.
+    IF r_def = abap_true.
+      PERFORM default_subject CHANGING lt_text.
+    ELSE.
+      PERFORM upload_file USING p_fsubj CHANGING lt_text.
+    ENDIF.
+    PERFORM process_text USING c_text_subj
+                               'eDocument alert - e-mail subject'
+                               lt_text.
+  ENDIF.
+
+  IF p_body = abap_true.
+    CLEAR lt_text.
+    IF r_def = abap_true.
+      PERFORM default_body CHANGING lt_text.
+    ELSE.
+      PERFORM upload_file USING p_fbody CHANGING lt_text.
+    ENDIF.
+    PERFORM process_text USING c_text_body
+                               'eDocument alert - e-mail body'
+                               lt_text.
+  ENDIF.
+
+  IF p_test = abap_false.
+    SKIP.
+    WRITE: / 'To transport: run RSTXTRAN with object TEXT, ID ST,',
+           / 'name Y0000FI_EDOC_ALERT*, language', p_langu, '.'.
+  ENDIF.
+
+*---------------------------------------------------------------------*
+* Built-in English subject (Excel "Error Notification Email")
+*---------------------------------------------------------------------*
+FORM default_subject CHANGING ct_text TYPE string_table.
+
+  APPEND |Action Required - eDocument Transmission Errors from Previous Day| TO ct_text.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Built-in English body (Excel "Error Notification Email")
+* &EDOC_LIST& is replaced by the list of eDocuments in Y0000FI_EDOC_ALERT
+*---------------------------------------------------------------------*
+FORM default_body CHANGING ct_text TYPE string_table.
+
+  APPEND |Dear Team,| TO ct_text.
+  APPEND || TO ct_text.
+  APPEND |Please find attached the error report for the eDocuments processed on the previous day.| TO ct_text.
+  APPEND |The report contains eDocuments that are transmitted to the respective authorities:| TO ct_text.
+  APPEND || TO ct_text.
+  APPEND |Red status: The eDocument could not be successfully transmitted to the authorities.| TO ct_text.
+  APPEND || TO ct_text.
+  APPEND |For all eDocuments with a red status, please:| TO ct_text.
+  APPEND || TO ct_text.
+  APPEND |1.  Review the error details in the Application Log.| TO ct_text.
+  APPEND |2.  If possible, resolve the issue directly by e.g. correcting the relevant master data.| TO ct_text.
+  APPEND |3.  After the correction has been made, please resubmit the eDocument.| TO ct_text.
+  APPEND || TO ct_text.
+  APPEND |If the issue cannot be resolved locally, please open an IT ticket (see link below) | &&
+         |and include the corresponding Source Key in the ticket description.| TO ct_text.
+  APPEND || TO ct_text.
+  APPEND |The following eDocuments require your attention.| TO ct_text.
+  APPEND |----------------------------------------| TO ct_text.
+  APPEND |&EDOC_LIST&| TO ct_text.
+  APPEND || TO ct_text.
+  APPEND |To request IT support, please open a ticket / incident via BITS Create IT Ticket:| TO ct_text.
+  APPEND |https://bssnow.beiersdorfgroup.com/esc?id=sc_cat_item&sys_id=656d81393b289e109f94372a85e45acb| TO ct_text.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Read a local text file (UTF-8), one entry per line
+*---------------------------------------------------------------------*
+FORM upload_file USING    iv_file TYPE localfile
+                 CHANGING ct_text TYPE string_table.
+
+  cl_gui_frontend_services=>gui_upload(
+    EXPORTING
+      filename = CONV string( iv_file )
+      filetype = 'ASC'
+      codepage = '4110'          " UTF-8
+    CHANGING
+      data_tab = ct_text
+    EXCEPTIONS
+      OTHERS   = 1 ).
+
+  IF sy-subrc <> 0.
+    MESSAGE |File { iv_file } could not be read| TYPE 'E'.
+  ENDIF.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* F4 help for a local file
+*---------------------------------------------------------------------*
+FORM f4_file CHANGING cv_file TYPE localfile.
+
+  DATA lt_files TYPE filetable.
+  DATA lv_rc    TYPE i.
+
+  cl_gui_frontend_services=>file_open_dialog(
+    EXPORTING
+      file_filter = '*.txt'
+    CHANGING
+      file_table  = lt_files
+      rc          = lv_rc
+    EXCEPTIONS
+      OTHERS      = 1 ).
+
+  IF sy-subrc = 0 AND lv_rc >= 1.
+    cv_file = lt_files[ 1 ]-filename.
+  ENDIF.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Plain lines -> SAPscript lines
+*   - one paragraph ('*') per line, empty line = empty paragraph
+*   - lines longer than 132 characters continue with '=' (no space);
+*     Y0000FI_EDOC_ALERT joins them back into one line
+*   - TAB becomes two spaces, CR is removed
+*   - empty lines at the end are dropped
+*---------------------------------------------------------------------*
+FORM build_tlines USING    it_text  TYPE string_table
+                  CHANGING ct_tline TYPE tline_tab.
+
+  DATA ls_tline TYPE tline.
+  DATA lv_rest  TYPE string.
+  DATA lv_cr    TYPE c LENGTH 1.
+
+  CLEAR ct_tline.
+  lv_cr = cl_abap_char_utilities=>cr_lf(1).
+
+  LOOP AT it_text INTO DATA(lv_line).
+
+    lv_rest = replace( val  = lv_line
+                       sub  = cl_abap_char_utilities=>horizontal_tab
+                       with = `  `
+                       occ  = 0 ).
+    lv_rest = replace( val  = lv_rest
+                       sub  = lv_cr
+                       with = ``
+                       occ  = 0 ).
+
+    ls_tline-tdformat = '*'.
+    DO.
+      IF strlen( lv_rest ) <= c_line_len.
+        ls_tline-tdline = lv_rest.
+        APPEND ls_tline TO ct_tline.
+        EXIT.
+      ENDIF.
+      ls_tline-tdline = substring( val = lv_rest len = c_line_len ).
+      APPEND ls_tline TO ct_tline.
+      lv_rest = substring( val = lv_rest off = c_line_len ).
+      ls_tline-tdformat = '='.
+    ENDDO.
+
+  ENDLOOP.
+
+  WHILE ct_tline IS NOT INITIAL
+    AND ct_tline[ lines( ct_tline ) ]-tdline IS INITIAL.
+    DELETE ct_tline INDEX lines( ct_tline ).
+  ENDWHILE.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Save (or, in a test run, only show) one standard text
+*---------------------------------------------------------------------*
+FORM process_text USING iv_name  TYPE tdobname
+                        iv_title TYPE clike
+                        it_text  TYPE string_table.
+
+  DATA lt_tline  TYPE tline_tab.
+  DATA lt_dummy  TYPE tline_tab.
+  DATA ls_header TYPE thead.
+  DATA lv_insert TYPE abap_bool.
+  DATA lv_result TYPE string.
+
+  PERFORM build_tlines USING it_text CHANGING lt_tline.
+
+  SKIP.
+  WRITE: / 'Text:', iv_name, 'ID', c_text_id, 'Language', p_langu.
+
+  IF lt_tline IS INITIAL.
+    WRITE: / '  Text is empty - not saved' COLOR COL_NEGATIVE.
+    RETURN.
+  ENDIF.
+
+  " Does the text already exist?
+  SELECT SINGLE tdname FROM stxh
+    WHERE tdobject = @c_text_obj
+      AND tdname   = @iv_name
+      AND tdid     = @c_text_id
+      AND tdspras  = @p_langu
+    INTO @DATA(lv_exists).
+  lv_insert = xsdbool( sy-subrc <> 0 ).
+
+  IF lv_insert = abap_false AND p_overw = abap_false.
+    WRITE: / '  Text already exists - mark "Overwrite" to replace it'
+             COLOR COL_NEGATIVE.
+    RETURN.
+  ENDIF.
+
+  " Show the lines (format column + text)
+  LOOP AT lt_tline INTO DATA(ls_tline).
+    WRITE: / '  ', ls_tline-tdformat, ls_tline-tdline.
+  ENDLOOP.
+
+  IF p_test = abap_true.
+    lv_result = COND #( WHEN lv_insert = abap_true
+                        THEN `Test run: would be created`
+                        ELSE `Test run: would be overwritten` ).
+    WRITE: / '  ', lv_result COLOR COL_TOTAL.
+    RETURN.
+  ENDIF.
+
+  " Header with the SO10 defaults (form, line size, ...)
+  CALL FUNCTION 'INIT_TEXT'
+    EXPORTING
+      id       = c_text_id
+      language = p_langu
+      name     = iv_name
+      object   = c_text_obj
+    IMPORTING
+      header   = ls_header
+    TABLES
+      lines    = lt_dummy
+    EXCEPTIONS
+      OTHERS   = 1.
+
+  IF sy-subrc <> 0.
+    CLEAR ls_header.
+    ls_header-tdobject = c_text_obj.
+    ls_header-tdname   = iv_name.
+    ls_header-tdid     = c_text_id.
+    ls_header-tdspras  = p_langu.
+  ENDIF.
+
+  ls_header-tdtitle = iv_title.
+
+  CALL FUNCTION 'SAVE_TEXT'
+    EXPORTING
+      header          = ls_header
+      insert          = lv_insert
+      savemode_direct = abap_true
+    TABLES
+      lines           = lt_tline
+    EXCEPTIONS
+      id              = 1
+      language        = 2
+      name            = 3
+      object          = 4
+      OTHERS          = 5.
+
+  IF sy-subrc <> 0.
+    ROLLBACK WORK.
+    WRITE: / '  Error saving the text (SAVE_TEXT)' COLOR COL_NEGATIVE.
+    RETURN.
+  ENDIF.
+
+  COMMIT WORK AND WAIT.
+  lv_result = COND #( WHEN lv_insert = abap_true
+                      THEN `Saved: created`
+                      ELSE `Saved: overwritten` ).
+  WRITE: / '  ', lv_result COLOR COL_POSITIVE.
+
+ENDFORM.

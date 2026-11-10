@@ -20,11 +20,10 @@ SELECTION-SCREEN END OF BLOCK b1.
 * Constants
 *---------------------------------------------------------------------*
 CONSTANTS:
-  " Default subject - used when the SO10 text has no 'Subject:' line
+  " Default subject - used when the SO10 subject text does not exist
   c_subject   TYPE string     VALUE 'Action Required - eDocument Transmission Errors from Previous Day',
-  " First line of the SO10 text starting with this prefix is the subject
-  c_subj_pref TYPE string     VALUE 'SUBJECT:',
-  " Standard text (SO10) with the e-mail body
+  " Standard texts (SO10): e-mail subject and e-mail body
+  c_text_subj TYPE tdobname   VALUE 'Y0000FI_EDOC_ALERT_SUBJECT',
   c_text_name TYPE tdobname   VALUE 'Y0000FI_EDOC_ALERT_BODY',
   c_text_id   TYPE tdid       VALUE 'ST',
   c_text_obj  TYPE tdobject   VALUE 'TEXT',
@@ -66,7 +65,8 @@ AT SELECTION-SCREEN ON p_langu.
   DATA lt_check_lines TYPE string_table.
   DATA lv_check_found TYPE abap_bool.
 
-  PERFORM read_body_text CHANGING lt_check_lines lv_check_found.
+  PERFORM read_so10_text USING c_text_name
+                         CHANGING lt_check_lines lv_check_found.
   IF lv_check_found = abap_false.
     MESSAGE |Standard text { c_text_name } not found in language { p_langu } (SO10)| TYPE 'E'.
   ENDIF.
@@ -121,29 +121,24 @@ FORM send_email.
   DATA lv_ph_used  TYPE abap_bool.
   DATA lv_subject  TYPE string.
 
+  DATA lt_subject  TYPE string_table.
+
   " E-mail body text from SO10 (Y0000FI_EDOC_ALERT_BODY) in P_LANGU
-  PERFORM read_body_text CHANGING lt_template lv_found.
+  PERFORM read_so10_text USING c_text_name
+                         CHANGING lt_template lv_found.
   IF lv_found = abap_false.
     MESSAGE |Standard text { c_text_name } not found in language { p_langu } (SO10)| TYPE 'E'.
   ENDIF.
 
-  " Subject: first line of the SO10 text if it starts with 'Subject:'
-  " (that line and the blank lines right after it are not in the body)
+  " E-mail subject from SO10 (Y0000FI_EDOC_ALERT_SUBJECT) in P_LANGU;
+  " all lines of the text form one subject. Not found -> default subject
   lv_subject = c_subject.
-  READ TABLE lt_template INTO DATA(lv_first_line) INDEX 1.
-  IF sy-subrc = 0.
-    lv_first_line = condense( lv_first_line ).
-    " CP is not case-sensitive: 'Subject:', 'SUBJECT:' etc.
-    IF lv_first_line CP |{ c_subj_pref }*|.
-      lv_subject = condense( substring( val = lv_first_line
-                                        off = strlen( c_subj_pref ) ) ).
-      DELETE lt_template INDEX 1.
-      WHILE lt_template IS NOT INITIAL AND lt_template[ 1 ] IS INITIAL.
-        DELETE lt_template INDEX 1.
-      ENDWHILE.
-      IF lv_subject IS INITIAL.
-        lv_subject = c_subject.
-      ENDIF.
+  PERFORM read_so10_text USING c_text_subj
+                         CHANGING lt_subject lv_found.
+  IF lv_found = abap_true.
+    DATA(lv_subj_text) = condense( concat_lines_of( table = lt_subject sep = ` ` ) ).
+    IF lv_subj_text IS NOT INITIAL.
+      lv_subject = lv_subj_text.
     ENDIF.
   ENDIF.
 
@@ -210,14 +205,15 @@ FORM send_email.
 ENDFORM.
 
 *---------------------------------------------------------------------*
-* Read the e-mail body from SO10 (ST / TEXT / Y0000FI_EDOC_ALERT_BODY)
-* in language P_LANGU and turn the SAPscript lines into plain lines:
+* Read a standard text from SO10 (ST / TEXT / iv_name) in language
+* P_LANGU and turn the SAPscript lines into plain lines:
 *   '*', '/' or other format -> new line
 *   '='                      -> continues the previous line, no space
 *   ' '                      -> continues the previous line with a space
 *   '/:' and '/*'            -> SAPscript command / comment, ignored
 *---------------------------------------------------------------------*
-FORM read_body_text CHANGING ct_lines TYPE string_table
+FORM read_so10_text USING    iv_name  TYPE tdobname
+                    CHANGING ct_lines TYPE string_table
                              cv_found TYPE abap_bool.
 
   DATA lt_tline TYPE STANDARD TABLE OF tline.
@@ -229,7 +225,7 @@ FORM read_body_text CHANGING ct_lines TYPE string_table
     EXPORTING
       id                      = c_text_id
       language                = p_langu
-      name                    = c_text_name
+      name                    = iv_name
       object                  = c_text_obj
     TABLES
       lines                   = lt_tline
