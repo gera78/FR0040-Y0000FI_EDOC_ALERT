@@ -1,0 +1,252 @@
+REPORT y0000fi_edoc_alert.
+
+*---------------------------------------------------------------------*
+* Selection Screen
+*---------------------------------------------------------------------*
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+
+  data dummy_email  type ad_smtpadr.
+  data lv_credat    type edocument-create_date.
+  data lv_edoc_type type edoc_type.
+
+  SELECT-OPTIONS: so_email FOR dummy_email NO INTERVALS OBLIGATORY.
+  SELECT-OPTIONS: so_crdat FOR lv_credat.
+  SELECT-OPTIONS: so_edoct FOR lv_edoc_type.
+
+SELECTION-SCREEN END OF BLOCK b1.
+
+*---------------------------------------------------------------------*
+* Constants
+*---------------------------------------------------------------------*
+CONSTANTS:
+  c_subject TYPE so_obj_des VALUE 'eInvoice check Status'.
+
+TYPES: BEGIN OF ty_edoc,
+         edoc_guid         TYPE edocument-edoc_guid,
+         source_key        TYPE edocument-source_key,
+         source_created_by TYPE edocument-source_created_by,
+         metastatus        TYPE edocument-metastatus,
+         create_date       TYPE edocument-create_date,
+       END OF ty_edoc.
+
+
+*---------------------------------------------------------------------*
+* Data Declarations
+*---------------------------------------------------------------------*
+DATA:
+  lt_edoc          TYPE TABLE OF ty_edoc,
+  ls_edoc          TYPE ty_edoc,
+  email_body       TYPE STANDARD TABLE OF string,
+  wa_body_line     TYPE string,
+
+  ls_log           TYPE y0000fi_edocmail,
+
+  lt_status_values TYPE TABLE OF dd07v,
+  ls_status_value  TYPE dd07v.
+
+
+
+
+
+*---------------------------------------------------------------------*
+* Start of Selection
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+
+  PERFORM get_status_texts.
+  PERFORM get_data.
+  PERFORM send_email.
+  PERFORM log_data.
+
+  IF sy-batch <> abap_true.
+    PERFORM display_alv.
+  ENDIF.
+
+*---------------------------------------------------------------------*
+* Get Data
+*---------------------------------------------------------------------*
+FORM get_data.
+
+  SELECT edoc_guid,
+         source_key,
+         source_created_by,
+         metastatus,
+         create_date
+    FROM edocument
+    INTO TABLE @lt_edoc
+    WHERE edoc_type   in @so_edoct
+      AND metastatus <> '0001'     " NOT Completed
+      AND create_date IN @so_crdat.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Send Email
+*---------------------------------------------------------------------*
+FORM send_email.
+
+  CLEAR email_body.
+
+  IF lt_edoc IS INITIAL.
+    RETURN.
+  ENDIF.
+
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Start Email Body
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+  APPEND |Dear all,| TO email_body.
+  APPEND | | TO email_body.
+  APPEND |Please find attached the error report for the eDocuments processed on the previous day.| TO email_body.
+  APPEND |The report contains eDocuments that are transmitted to the respective authorities:| TO email_body.
+  APPEND | | TO email_body.
+  APPEND |Red status: The eDocument could not be successfully transmitted to the authorities.| TO email_body.
+  APPEND | | TO email_body.
+  APPEND |For all eDocuments with a red status, please:| TO email_body.
+  APPEND | | TO email_body.
+  APPEND |1.  Review the error details in the Application Log.| TO email_body.
+  APPEND |2.  If possible, resolve the issue directly by e.g. correcting the relevant master data.| TO email_body.
+  APPEND |3.  After the correction has been made, please resubmit the eDocument.| TO email_body.
+  APPEND | | TO email_body.
+  APPEND |If the issue cannot be resolved locally, please open an IT ticket (see link below) and include the corresponding Source Key in the ticket description.| TO email_body.
+  APPEND | | TO email_body.
+  APPEND |The following eDocuments require your attention.| TO email_body.
+  APPEND |----------------------------------------| TO email_body.
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" End Email Body
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+
+  LOOP AT lt_edoc INTO ls_edoc.
+
+    APPEND |eDocument: { ls_edoc-edoc_guid }| TO email_body.
+    " eDocument Source Key
+    APPEND |eDocument Source: { ls_edoc-source_key }| TO email_body.
+
+    " Get readable status text
+    READ TABLE lt_status_values INTO ls_status_value
+      WITH KEY domvalue_l = ls_edoc-metastatus.
+
+    IF sy-subrc = 0.
+      APPEND |Status: { ls_status_value-ddtext }| TO email_body.
+    ELSE.
+      APPEND |Status: { ls_edoc-metastatus }| TO email_body.
+    ENDIF.
+
+    APPEND |Created by: { ls_edoc-source_created_by }| TO email_body.
+    APPEND |Creation Date: { ls_edoc-create_date }| TO email_body.
+    APPEND |Source Key: { ls_edoc-source_key }| TO email_body.
+    APPEND |----------------------------------------| TO email_body.
+
+  ENDLOOP.
+
+
+
+  APPEND | | TO email_body.
+  APPEND |To request IT support, please open a ticket / incident via BITS Create IT Ticket:| TO email_body.
+  APPEND |https://bssnow.beiersdorfgroup.com/esc?id=sc_cat_item&sys_id=656d81393b289e109f94372a85e45acb| TO email_body.
+
+
+
+  DATA(lo_message) = NEW cl_bcs_message( ).
+  lo_message->set_subject( CONV string( c_subject ) ).
+
+  CONCATENATE LINES OF email_body INTO wa_body_line
+    SEPARATED BY cl_abap_char_utilities=>cr_lf.
+
+  lo_message->set_main_doc( wa_body_line ).
+
+  LOOP AT so_email INTO DATA(ls_email).
+    lo_message->add_recipient(
+      iv_address = CONV string( ls_email-low ) ).
+  ENDLOOP.
+
+  lo_message->set_send_immediately( abap_true ).
+  lo_message->set_update_task( abap_false ).
+
+  TRY.
+      lo_message->send( ).
+    CATCH cx_bcs_send INTO DATA(lx_send).
+      MESSAGE lx_send->get_text( ) TYPE 'E'.
+  ENDTRY.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Get Status Texts (Domain)
+*---------------------------------------------------------------------*
+FORM get_status_texts.
+
+  CALL FUNCTION 'DD_DOMVALUES_GET'
+    EXPORTING
+      domname   = 'EDOC_METASTATUS'
+      text      = 'X'
+    TABLES
+      dd07v_tab = lt_status_values.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Logging
+*---------------------------------------------------------------------*
+FORM log_data.
+
+  LOOP AT lt_edoc INTO ls_edoc.
+    LOOP AT so_email INTO DATA(ls_email).
+
+      " Duplicate Check
+      SELECT SINGLE *
+        FROM y0000fi_edocmail
+        WHERE edoc_guid = @ls_edoc-edoc_guid
+          AND email_to  = @ls_email-low
+        INTO @DATA(ls_existing).
+
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
+
+      CLEAR ls_log.
+
+      ls_log-mandt = sy-mandt.
+      ls_log-edoc_guid = ls_edoc-edoc_guid.
+      ls_log-email_to  = ls_email-low.
+      ls_log-source_key = ls_edoc-source_key.
+
+      " ✅ KORREKT: METASTATUS
+      ls_log-status = ls_edoc-metastatus.
+
+      READ TABLE lt_status_values INTO ls_status_value
+        WITH KEY domvalue_l = ls_edoc-metastatus.
+
+      IF sy-subrc = 0.
+        ls_log-status_text = ls_status_value-ddtext.
+      ENDIF.
+
+      ls_log-source_created_by = ls_edoc-source_created_by.
+      ls_log-sent_date = sy-datum.
+      ls_log-sent_time = sy-uzeit.
+
+      INSERT y0000fi_edocmail FROM ls_log.
+
+    ENDLOOP.
+  ENDLOOP.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* ALV Display
+*---------------------------------------------------------------------*
+FORM display_alv.
+
+  TRY.
+      cl_salv_table=>factory(
+        IMPORTING r_salv_table = DATA(lo_alv)
+        CHANGING  t_table      = lt_edoc ).
+
+      lo_alv->display( ).
+
+    CATCH cx_salv_msg.
+  ENDTRY.
+
+ENDFORM.
