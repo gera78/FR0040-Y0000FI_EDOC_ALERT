@@ -12,7 +12,7 @@ SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
   SELECT-OPTIONS: so_email FOR dummy_email NO INTERVALS OBLIGATORY.
   SELECT-OPTIONS: so_crdat FOR lv_credat.
   SELECT-OPTIONS: so_edoct FOR lv_edoc_type.
-  PARAMETERS:     p_langu  TYPE spras DEFAULT sy-langu OBLIGATORY.
+  PARAMETERS:     p_langu  TYPE spras DEFAULT sy-langu OBLIGATORY. " CTASK0111324
 
 SELECTION-SCREEN END OF BLOCK b1.
 
@@ -20,6 +20,8 @@ SELECTION-SCREEN END OF BLOCK b1.
 * Constants
 *---------------------------------------------------------------------*
 CONSTANTS:
+*  c_subject TYPE so_obj_des VALUE 'eInvoice check Status'.   " CTASK0111324
+* Begin of Change : CTASK0111324
   " Default subject - used when the SO10 subject text does not exist
   c_subject   TYPE string     VALUE 'Action Required - eDocument Transmission Errors from Previous Day',
   " Standard texts (SO10): e-mail subject and e-mail body
@@ -29,6 +31,7 @@ CONSTANTS:
   c_text_obj  TYPE tdobject   VALUE 'TEXT',
   " Placeholder in the SO10 text replaced by the list of eDocuments
   c_ph_list   TYPE string     VALUE '&EDOC_LIST&'.
+* End of Change : CTASK0111324
 
 TYPES: BEGIN OF ty_edoc,
          edoc_guid         TYPE edocument-edoc_guid,
@@ -57,6 +60,7 @@ DATA:
 
 
 
+* Begin of Change : CTASK0111324
 *---------------------------------------------------------------------*
 * Selection screen check: SO10 text must exist in the chosen language
 *---------------------------------------------------------------------*
@@ -70,6 +74,7 @@ AT SELECTION-SCREEN ON p_langu.
   IF lv_check_found = abap_false.
     MESSAGE |Standard text { c_text_name } not found in language { p_langu } (SO10)| TYPE 'E'.
   ENDIF.
+* End of Change : CTASK0111324
 
 *---------------------------------------------------------------------*
 * Start of Selection
@@ -115,13 +120,71 @@ FORM send_email.
   ENDIF.
 
 
+* Begin of Change : CTASK0111324 - hard-coded e-mail body replaced by SO10 texts
+*""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+*" Start Email Body
+*""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+*
+*  APPEND |Dear all,| TO email_body.
+*  APPEND | | TO email_body.
+*  APPEND |Please find attached the error report for the eDocuments processed on the previous day.| TO email_body.
+*  APPEND |The report contains eDocuments that are transmitted to the respective authorities:| TO email_body.
+*  APPEND | | TO email_body.
+*  APPEND |Red status: The eDocument could not be successfully transmitted to the authorities.| TO email_body.
+*  APPEND | | TO email_body.
+*  APPEND |For all eDocuments with a red status, please:| TO email_body.
+*  APPEND | | TO email_body.
+*  APPEND |1.  Review the error details in the Application Log.| TO email_body.
+*  APPEND |2.  If possible, resolve the issue directly by e.g. correcting the relevant master data.| TO email_body.
+*  APPEND |3.  After the correction has been made, please resubmit the eDocument.| TO email_body.
+*  APPEND | | TO email_body.
+*  APPEND |If the issue cannot be resolved locally, please open an IT ticket (see link below) and include the corresponding Source Key in the ticket description.| TO email_body.
+*  APPEND | | TO email_body.
+*  APPEND |The following eDocuments require your attention.| TO email_body.
+*  APPEND |----------------------------------------| TO email_body.
+*""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+*" End Email Body
+*""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+*
+*
+*  LOOP AT lt_edoc INTO ls_edoc.
+*
+*    APPEND |eDocument: { ls_edoc-edoc_guid }| TO email_body.
+*    " eDocument Source Key
+*    APPEND |eDocument Source: { ls_edoc-source_key }| TO email_body.
+*
+*    " Get readable status text
+*    READ TABLE lt_status_values INTO ls_status_value
+*      WITH KEY domvalue_l = ls_edoc-metastatus.
+*
+*    IF sy-subrc = 0.
+*      APPEND |Status: { ls_status_value-ddtext }| TO email_body.
+*    ELSE.
+*      APPEND |Status: { ls_edoc-metastatus }| TO email_body.
+*    ENDIF.
+*
+*    APPEND |Created by: { ls_edoc-source_created_by }| TO email_body.
+*    APPEND |Creation Date: { ls_edoc-create_date }| TO email_body.
+*    APPEND |Source Key: { ls_edoc-source_key }| TO email_body.
+*    APPEND |----------------------------------------| TO email_body.
+*
+*  ENDLOOP.
+*
+*
+*
+*  APPEND | | TO email_body.
+*  APPEND |To request IT support, please open a ticket / incident via BITS Create IT Ticket:| TO email_body.
+*  APPEND |https://bssnow.beiersdorfgroup.com/esc?id=sc_cat_item&sys_id=656d81393b289e109f94372a85e45acb| TO email_body.
+* End of Change : CTASK0111324
+* Begin of Change : CTASK0111324
+  " E-mail subject and body come from SO10 texts in language P_LANGU:
+  "   Y0000FI_EDOC_ALERT_SUBJECT and Y0000FI_EDOC_ALERT_BODY
   DATA lt_template TYPE string_table.
   DATA lt_list     TYPE string_table.
+  DATA lt_subject  TYPE string_table.
   DATA lv_found    TYPE abap_bool.
   DATA lv_ph_used  TYPE abap_bool.
   DATA lv_subject  TYPE string.
-
-  DATA lt_subject  TYPE string_table.
 
   " E-mail body text from SO10 (Y0000FI_EDOC_ALERT_BODY) in P_LANGU
   PERFORM read_so10_text USING c_text_name
@@ -143,6 +206,7 @@ FORM send_email.
   ENDIF.
 
   " List of eDocuments - goes where the SO10 text has &EDOC_LIST&
+  " (line "eDocument Source" removed - same value as "Source Key")
   LOOP AT lt_edoc INTO ls_edoc.
 
     APPEND |eDocument: { ls_edoc-edoc_guid }| TO lt_list.
@@ -179,9 +243,14 @@ FORM send_email.
     APPEND | | TO email_body.
     APPEND LINES OF lt_list TO email_body.
   ENDIF.
+* End of Change : CTASK0111324
+
+
+
 
   DATA(lo_message) = NEW cl_bcs_message( ).
-  lo_message->set_subject( lv_subject ).
+*  lo_message->set_subject( CONV string( c_subject ) ).   " CTASK0111324
+  lo_message->set_subject( lv_subject ).   " CTASK0111324
 
   CONCATENATE LINES OF email_body INTO wa_body_line
     SEPARATED BY cl_abap_char_utilities=>cr_lf.
@@ -204,6 +273,7 @@ FORM send_email.
 
 ENDFORM.
 
+* Begin of Change : CTASK0111324
 *---------------------------------------------------------------------*
 * Read a standard text from SO10 (ST / TEXT / iv_name) in language
 * P_LANGU and turn the SAPscript lines into plain lines:
@@ -268,6 +338,7 @@ FORM read_so10_text USING    iv_name  TYPE tdobname
   ENDLOOP.
 
 ENDFORM.
+* End of Change : CTASK0111324
 
 *---------------------------------------------------------------------*
 * Get Status Texts (Domain)
