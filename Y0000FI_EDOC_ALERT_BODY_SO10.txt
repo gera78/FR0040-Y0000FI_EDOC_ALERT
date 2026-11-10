@@ -1,0 +1,44 @@
+Standard text (SO10) used by report Y0000FI_EDOC_ALERT as the e-mail body
+==========================================================================
+Text name : Y0000FI_EDOC_ALERT_BODY
+Text ID   : ST
+Language  : one version per language (EN, FR, ...) - chosen on the
+            selection screen with P_LANGU
+Transport : SO10 > Utilities > Transport (or RSTXTRAN) to put the text
+            in a transport request.
+
+Placeholder
+  &EDOC_LIST&  The whole line with this placeholder is replaced by the
+               list of eDocuments (one block per eDocument). If the
+               placeholder is missing, the list goes at the end.
+
+Formatting (column on the left in the SO10 line editor)
+  *   new paragraph / new line   (empty line with * = blank line)
+  /   new line
+  =   continues the previous line without a space
+      (blank) continues the previous line with a space
+  /:  and /*  are ignored (SAPscript commands and comments)
+
+Content in English (the text that was hard-coded in the report)
+----------------------------------------------------------------
+* Dear all,
+*
+* Please find attached the error report for the eDocuments processed on the previous day.
+* The report contains eDocuments that are transmitted to the respective authorities:
+*
+* Red status: The eDocument could not be successfully transmitted to the authorities.
+*
+* For all eDocuments with a red status, please:
+*
+* 1.  Review the error details in the Application Log.
+* 2.  If possible, resolve the issue directly by e.g. correcting the relevant master data.
+* 3.  After the correction has been made, please resubmit the eDocument.
+*
+* If the issue cannot be resolved locally, please open an IT ticket (see link below) and include the corresponding Source Key in the ticket description.
+*
+* The following eDocuments require your attention.
+* ----------------------------------------
+* &EDOC_LIST&
+*
+* To request IT support, please open a ticket / incident via BITS Create IT Ticket:
+* https://bssnow.beiersdorfgroup.com/esc?id=sc_cat_item&sys_id=656d81393b289e109f94372a85e45acb

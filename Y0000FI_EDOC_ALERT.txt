@@ -12,6 +12,7 @@ SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
   SELECT-OPTIONS: so_email FOR dummy_email NO INTERVALS OBLIGATORY.
   SELECT-OPTIONS: so_crdat FOR lv_credat.
   SELECT-OPTIONS: so_edoct FOR lv_edoc_type.
+  PARAMETERS:     p_langu  TYPE spras DEFAULT sy-langu OBLIGATORY.
 
 SELECTION-SCREEN END OF BLOCK b1.
 
@@ -19,7 +20,13 @@ SELECTION-SCREEN END OF BLOCK b1.
 * Constants
 *---------------------------------------------------------------------*
 CONSTANTS:
-  c_subject TYPE so_obj_des VALUE 'eInvoice check Status'.
+  c_subject   TYPE so_obj_des VALUE 'eInvoice check Status',
+  " Standard text (SO10) with the e-mail body
+  c_text_name TYPE tdobname   VALUE 'Y0000FI_EDOC_ALERT_BODY',
+  c_text_id   TYPE tdid       VALUE 'ST',
+  c_text_obj  TYPE tdobject   VALUE 'TEXT',
+  " Placeholder in the SO10 text replaced by the list of eDocuments
+  c_ph_list   TYPE string     VALUE '&EDOC_LIST&'.
 
 TYPES: BEGIN OF ty_edoc,
          edoc_guid         TYPE edocument-edoc_guid,
@@ -47,6 +54,19 @@ DATA:
 
 
 
+
+*---------------------------------------------------------------------*
+* Selection screen check: SO10 text must exist in the chosen language
+*---------------------------------------------------------------------*
+AT SELECTION-SCREEN ON p_langu.
+
+  DATA lt_check_lines TYPE string_table.
+  DATA lv_check_found TYPE abap_bool.
+
+  PERFORM read_body_text CHANGING lt_check_lines lv_check_found.
+  IF lv_check_found = abap_false.
+    MESSAGE |Standard text { c_text_name } not found in language { p_langu } (SO10)| TYPE 'E'.
+  ENDIF.
 
 *---------------------------------------------------------------------*
 * Start of Selection
@@ -92,62 +112,56 @@ FORM send_email.
   ENDIF.
 
 
-""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" Start Email Body
-""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+  DATA lt_template TYPE string_table.
+  DATA lt_list     TYPE string_table.
+  DATA lv_found    TYPE abap_bool.
+  DATA lv_ph_used  TYPE abap_bool.
 
-  APPEND |Dear all,| TO email_body.
-  APPEND | | TO email_body.
-  APPEND |Please find attached the error report for the eDocuments processed on the previous day.| TO email_body.
-  APPEND |The report contains eDocuments that are transmitted to the respective authorities:| TO email_body.
-  APPEND | | TO email_body.
-  APPEND |Red status: The eDocument could not be successfully transmitted to the authorities.| TO email_body.
-  APPEND | | TO email_body.
-  APPEND |For all eDocuments with a red status, please:| TO email_body.
-  APPEND | | TO email_body.
-  APPEND |1.  Review the error details in the Application Log.| TO email_body.
-  APPEND |2.  If possible, resolve the issue directly by e.g. correcting the relevant master data.| TO email_body.
-  APPEND |3.  After the correction has been made, please resubmit the eDocument.| TO email_body.
-  APPEND | | TO email_body.
-  APPEND |If the issue cannot be resolved locally, please open an IT ticket (see link below) and include the corresponding Source Key in the ticket description.| TO email_body.
-  APPEND | | TO email_body.
-  APPEND |The following eDocuments require your attention.| TO email_body.
-  APPEND |----------------------------------------| TO email_body.
-""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" End Email Body
-""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+  " E-mail body text from SO10 (Y0000FI_EDOC_ALERT_BODY) in P_LANGU
+  PERFORM read_body_text CHANGING lt_template lv_found.
+  IF lv_found = abap_false.
+    MESSAGE |Standard text { c_text_name } not found in language { p_langu } (SO10)| TYPE 'E'.
+  ENDIF.
 
-
+  " List of eDocuments - goes where the SO10 text has &EDOC_LIST&
   LOOP AT lt_edoc INTO ls_edoc.
 
-    APPEND |eDocument: { ls_edoc-edoc_guid }| TO email_body.
+    APPEND |eDocument: { ls_edoc-edoc_guid }| TO lt_list.
     " eDocument Source Key
-    APPEND |eDocument Source: { ls_edoc-source_key }| TO email_body.
+    APPEND |eDocument Source: { ls_edoc-source_key }| TO lt_list.
 
     " Get readable status text
     READ TABLE lt_status_values INTO ls_status_value
       WITH KEY domvalue_l = ls_edoc-metastatus.
 
     IF sy-subrc = 0.
-      APPEND |Status: { ls_status_value-ddtext }| TO email_body.
+      APPEND |Status: { ls_status_value-ddtext }| TO lt_list.
     ELSE.
-      APPEND |Status: { ls_edoc-metastatus }| TO email_body.
+      APPEND |Status: { ls_edoc-metastatus }| TO lt_list.
     ENDIF.
 
-    APPEND |Created by: { ls_edoc-source_created_by }| TO email_body.
-    APPEND |Creation Date: { ls_edoc-create_date }| TO email_body.
-    APPEND |Source Key: { ls_edoc-source_key }| TO email_body.
-    APPEND |----------------------------------------| TO email_body.
+    APPEND |Created by: { ls_edoc-source_created_by }| TO lt_list.
+    APPEND |Creation Date: { ls_edoc-create_date }| TO lt_list.
+    APPEND |Source Key: { ls_edoc-source_key }| TO lt_list.
+    APPEND |----------------------------------------| TO lt_list.
 
   ENDLOOP.
 
+  " Merge: SO10 text with the list in place of the placeholder line
+  LOOP AT lt_template INTO DATA(lv_template_line).
+    IF lv_template_line CS c_ph_list.
+      APPEND LINES OF lt_list TO email_body.
+      lv_ph_used = abap_true.
+    ELSE.
+      APPEND lv_template_line TO email_body.
+    ENDIF.
+  ENDLOOP.
 
-
-  APPEND | | TO email_body.
-  APPEND |To request IT support, please open a ticket / incident via BITS Create IT Ticket:| TO email_body.
-  APPEND |https://bssnow.beiersdorfgroup.com/esc?id=sc_cat_item&sys_id=656d81393b289e109f94372a85e45acb| TO email_body.
-
-
+  " Placeholder missing in the SO10 text: list goes at the end
+  IF lv_ph_used = abap_false.
+    APPEND | | TO email_body.
+    APPEND LINES OF lt_list TO email_body.
+  ENDIF.
 
   DATA(lo_message) = NEW cl_bcs_message( ).
   lo_message->set_subject( CONV string( c_subject ) ).
@@ -170,6 +184,70 @@ FORM send_email.
     CATCH cx_bcs_send INTO DATA(lx_send).
       MESSAGE lx_send->get_text( ) TYPE 'E'.
   ENDTRY.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Read the e-mail body from SO10 (ST / TEXT / Y0000FI_EDOC_ALERT_BODY)
+* in language P_LANGU and turn the SAPscript lines into plain lines:
+*   '*', '/' or other format -> new line
+*   '='                      -> continues the previous line, no space
+*   ' '                      -> continues the previous line with a space
+*   '/:' and '/*'            -> SAPscript command / comment, ignored
+*---------------------------------------------------------------------*
+FORM read_body_text CHANGING ct_lines TYPE string_table
+                             cv_found TYPE abap_bool.
+
+  DATA lt_tline TYPE STANDARD TABLE OF tline.
+  DATA lv_text  TYPE string.
+
+  CLEAR: ct_lines, cv_found.
+
+  CALL FUNCTION 'READ_TEXT'
+    EXPORTING
+      id                      = c_text_id
+      language                = p_langu
+      name                    = c_text_name
+      object                  = c_text_obj
+    TABLES
+      lines                   = lt_tline
+    EXCEPTIONS
+      id                      = 1
+      language                = 2
+      name                    = 3
+      not_found               = 4
+      object                  = 5
+      reference_check         = 6
+      wrong_access_to_archive = 7
+      OTHERS                  = 8.
+
+  IF sy-subrc <> 0.
+    RETURN.
+  ENDIF.
+
+  cv_found = abap_true.
+
+  LOOP AT lt_tline INTO DATA(ls_tline).
+
+    IF ls_tline-tdformat = '/:' OR ls_tline-tdformat = '/*'.
+      CONTINUE.
+    ENDIF.
+
+    lv_text = ls_tline-tdline.
+
+    IF ( ls_tline-tdformat = '=' OR ls_tline-tdformat = space )
+       AND ct_lines IS NOT INITIAL.
+      ASSIGN ct_lines[ lines( ct_lines ) ] TO FIELD-SYMBOL(<lv_last>).
+      IF ls_tline-tdformat = '='.
+        <lv_last> = <lv_last> && lv_text.
+      ELSE.
+        <lv_last> = |{ <lv_last> } { lv_text }|.
+      ENDIF.
+    ELSE.
+      APPEND lv_text TO ct_lines.
+    ENDIF.
+
+  ENDLOOP.
 
 ENDFORM.
 
