@@ -20,7 +20,10 @@ SELECTION-SCREEN END OF BLOCK b1.
 * Constants
 *---------------------------------------------------------------------*
 CONSTANTS:
-  c_subject   TYPE so_obj_des VALUE 'eInvoice check Status',
+  " Default subject - used when the SO10 text has no 'Subject:' line
+  c_subject   TYPE string     VALUE 'Action Required - eDocument Transmission Errors from Previous Day',
+  " First line of the SO10 text starting with this prefix is the subject
+  c_subj_pref TYPE string     VALUE 'SUBJECT:',
   " Standard text (SO10) with the e-mail body
   c_text_name TYPE tdobname   VALUE 'Y0000FI_EDOC_ALERT_BODY',
   c_text_id   TYPE tdid       VALUE 'ST',
@@ -116,6 +119,7 @@ FORM send_email.
   DATA lt_list     TYPE string_table.
   DATA lv_found    TYPE abap_bool.
   DATA lv_ph_used  TYPE abap_bool.
+  DATA lv_subject  TYPE string.
 
   " E-mail body text from SO10 (Y0000FI_EDOC_ALERT_BODY) in P_LANGU
   PERFORM read_body_text CHANGING lt_template lv_found.
@@ -123,12 +127,30 @@ FORM send_email.
     MESSAGE |Standard text { c_text_name } not found in language { p_langu } (SO10)| TYPE 'E'.
   ENDIF.
 
+  " Subject: first line of the SO10 text if it starts with 'Subject:'
+  " (that line and the blank lines right after it are not in the body)
+  lv_subject = c_subject.
+  READ TABLE lt_template INTO DATA(lv_first_line) INDEX 1.
+  IF sy-subrc = 0.
+    lv_first_line = condense( lv_first_line ).
+    " CP is not case-sensitive: 'Subject:', 'SUBJECT:' etc.
+    IF lv_first_line CP |{ c_subj_pref }*|.
+      lv_subject = condense( substring( val = lv_first_line
+                                        off = strlen( c_subj_pref ) ) ).
+      DELETE lt_template INDEX 1.
+      WHILE lt_template IS NOT INITIAL AND lt_template[ 1 ] IS INITIAL.
+        DELETE lt_template INDEX 1.
+      ENDWHILE.
+      IF lv_subject IS INITIAL.
+        lv_subject = c_subject.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
   " List of eDocuments - goes where the SO10 text has &EDOC_LIST&
   LOOP AT lt_edoc INTO ls_edoc.
 
     APPEND |eDocument: { ls_edoc-edoc_guid }| TO lt_list.
-    " eDocument Source Key
-    APPEND |eDocument Source: { ls_edoc-source_key }| TO lt_list.
 
     " Get readable status text
     READ TABLE lt_status_values INTO ls_status_value
@@ -164,7 +186,7 @@ FORM send_email.
   ENDIF.
 
   DATA(lo_message) = NEW cl_bcs_message( ).
-  lo_message->set_subject( CONV string( c_subject ) ).
+  lo_message->set_subject( lv_subject ).
 
   CONCATENATE LINES OF email_body INTO wa_body_line
     SEPARATED BY cl_abap_char_utilities=>cr_lf.

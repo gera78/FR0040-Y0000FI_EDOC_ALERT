@@ -1,11 +1,18 @@
-Standard text (SO10) used by report Y0000FI_EDOC_ALERT as the e-mail body
+Standard text (SO10) used by report Y0000FI_EDOC_ALERT as the e-mail
+subject and body
 ==========================================================================
 Text name : Y0000FI_EDOC_ALERT_BODY
 Text ID   : ST
 Language  : one version per language (EN, FR, ...) - chosen on the
             selection screen with P_LANGU
-Transport : SO10 > Utilities > Transport (or RSTXTRAN) to put the text
-            in a transport request.
+Transport : SO10 does not ask for a transport request; use report
+            RSTXTRAN to put the text in a request.
+
+Subject
+  First line starting with "Subject:" = e-mail subject (that line and the
+  blank lines after it are not part of the body). Without that line the
+  report uses its default subject
+  "Action Required - eDocument Transmission Errors from Previous Day".
 
 Placeholder
   &EDOC_LIST&  The whole line with this placeholder is replaced by the
@@ -19,9 +26,12 @@ Formatting (column on the left in the SO10 line editor)
       (blank) continues the previous line with a space
   /:  and /*  are ignored (SAPscript commands and comments)
 
-Content in English (the text that was hard-coded in the report)
+Content in English - text from the tab "Error Notification Email"
+(Excel, 20.10), plus the separator, the list and the ticket link
 ----------------------------------------------------------------
-* Dear all,
+* Subject: Action Required - eDocument Transmission Errors from Previous Day
+*
+* Dear Team,
 *
 * Please find attached the error report for the eDocuments processed on the previous day.
 * The report contains eDocuments that are transmitted to the respective authorities:
@@ -42,3 +52,12 @@ Content in English (the text that was hard-coded in the report)
 *
 * To request IT support, please open a ticket / incident via BITS Create IT Ticket:
 * https://bssnow.beiersdorfgroup.com/esc?id=sc_cat_item&sys_id=656d81393b289e109f94372a85e45acb
+
+Block per eDocument (built by the report, not in SO10)
+------------------------------------------------------
+eDocument: <EDOC_GUID>
+Status: <METASTATUS text>
+Created by: <SOURCE_CREATED_BY>
+Creation Date: <CREATE_DATE>
+Source Key: <SOURCE_KEY>
+----------------------------------------
