@@ -26,3 +26,16 @@ step (variant) per recipient group:
 
 Transport of the SO10 texts: report `RSTXTRAN`, object `TEXT`, ID `ST`,
 name `Y0000FI_EDOC_ALERT*`.
+
+## Open items
+
+- Link from the eDocument GUID in the ALV to `EDOC_COCKPIT` (filtered on the
+  eDocument): needs the technical names of the `EDOC_COCKPIT` selection-screen
+  fields (company code, source key / eDocument).
+- Only red eDocuments ("Action required") in the e-mail: needs the values of
+  domain `EDOC_METASTATUS` and business confirmation.
+- PPF Status (table `EDOFREINV`) in the e-mail and the ALV: needs the field name.
+- E-mail subject longer than 50 characters: shorten it in SO10 or send with
+  `CL_BCS` + `set_message_subject`.
+- Reconciliation: 1827 eDocuments without channel filter vs 852 in the three
+  e-mails - check other channels / eDocument types.
