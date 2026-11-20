@@ -51,6 +51,12 @@ TYPES: BEGIN OF ty_edoc,
          edoc_type         TYPE edocument-edoc_type,      " CTASK0111324
          proc_status       TYPE edocument-proc_status,    " CTASK0111324
          metastatus_text   TYPE val_text,                 " CTASK0111324
+         process           TYPE edocument-process,        " CTASK0111324
+         source_type       TYPE edocument-source_type,    " CTASK0111324
+         bukrs             TYPE edocument-bukrs,          " CTASK0111324
+         proc_status_desc  TYPE edoprocstatt-description, " CTASK0111324
+         source_type_desc  TYPE edosrctypet-description,  " CTASK0111324
+         edoc_type_desc    TYPE edotypet-description,     " CTASK0111324
        END OF ty_edoc.
 
 
@@ -109,6 +115,7 @@ START-OF-SELECTION.
   PERFORM get_data.
   PERFORM get_channel.   " CTASK0111324
   PERFORM fill_status_text.   " CTASK0111324
+  PERFORM fill_texts.         " CTASK0111324
   PERFORM send_email.
   PERFORM log_data.
 
@@ -128,7 +135,10 @@ FORM get_data.
 *         create_date   " CTASK0111324
          create_date,   " CTASK0111324
          edoc_type,     " CTASK0111324
-         proc_status    " CTASK0111324
+         proc_status,   " CTASK0111324
+         process,       " CTASK0111324
+         source_type,   " CTASK0111324
+         bukrs          " CTASK0111324
     FROM edocument
 *    INTO TABLE @lt_edoc   " CTASK0111324
     INTO CORRESPONDING FIELDS OF TABLE @lt_edoc   " CTASK0111324
@@ -232,6 +242,62 @@ FORM fill_status_text.
       ELSEIF lv_text_en CS 'COMPLET'.
         <ls_edoc>-status_icon = icon_green_light.
       ENDIF.
+    ENDIF.
+
+  ENDLOOP.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Descriptions for the ALV (in English, as in EDOC_COCKPIT):
+*   process status (EDOPROCSTATT), source type (EDOSRCTYPET),
+*   eDocument type (EDOTYPET)
+*---------------------------------------------------------------------*
+FORM fill_texts.
+
+  CONSTANTS lc_langu TYPE spras VALUE 'E'.
+
+  IF lt_edoc IS INITIAL.
+    RETURN.
+  ENDIF.
+
+  SELECT process, proc_status, description
+    FROM edoprocstatt
+    WHERE spras = @lc_langu
+    INTO TABLE @DATA(lt_proc_text).
+  SORT lt_proc_text BY process proc_status.
+
+  SELECT source_type, description
+    FROM edosrctypet
+    WHERE spras = @lc_langu
+    INTO TABLE @DATA(lt_src_text).
+  SORT lt_src_text BY source_type.
+
+  SELECT edoc_type, description
+    FROM edotypet
+    WHERE spras = @lc_langu
+    INTO TABLE @DATA(lt_type_text).
+  SORT lt_type_text BY edoc_type.
+
+  LOOP AT lt_edoc ASSIGNING FIELD-SYMBOL(<ls_edoc>).
+
+    READ TABLE lt_proc_text INTO DATA(ls_proc_text)
+      WITH KEY process     = <ls_edoc>-process
+               proc_status = <ls_edoc>-proc_status BINARY SEARCH.
+    IF sy-subrc = 0.
+      <ls_edoc>-proc_status_desc = ls_proc_text-description.
+    ENDIF.
+
+    READ TABLE lt_src_text INTO DATA(ls_src_text)
+      WITH KEY source_type = <ls_edoc>-source_type BINARY SEARCH.
+    IF sy-subrc = 0.
+      <ls_edoc>-source_type_desc = ls_src_text-description.
+    ENDIF.
+
+    READ TABLE lt_type_text INTO DATA(ls_type_text)
+      WITH KEY edoc_type = <ls_edoc>-edoc_type BINARY SEARCH.
+    IF sy-subrc = 0.
+      <ls_edoc>-edoc_type_desc = ls_type_text-description.
     ENDIF.
 
   ENDLOOP.
@@ -582,6 +648,52 @@ FORM display_alv.
           lo_col = CAST cl_salv_column_table(
                      lo_columns->get_column( 'SOURCE_KEY' ) ).
           lo_col->set_cell_type( if_salv_c_cell_type=>hotspot ).
+
+          " Column titles for the descriptions
+          lo_col = CAST cl_salv_column_table(
+                     lo_columns->get_column( 'PROC_STATUS_DESC' ) ).
+          lo_col->set_short_text( 'Proc.Stat.' ).
+          lo_col->set_medium_text( 'Proc. Status Descr.' ).
+          lo_col->set_long_text( 'Process Status Description' ).
+
+          lo_col = CAST cl_salv_column_table(
+                     lo_columns->get_column( 'SOURCE_TYPE_DESC' ) ).
+          lo_col->set_short_text( 'Source' ).
+          lo_col->set_medium_text( 'Source Description' ).
+          lo_col->set_long_text( 'Source Description' ).
+
+          lo_col = CAST cl_salv_column_table(
+                     lo_columns->get_column( 'EDOC_TYPE_DESC' ) ).
+          lo_col->set_short_text( 'Type Descr' ).
+          lo_col->set_medium_text( 'Type Description' ).
+          lo_col->set_long_text( 'eDocument Type Description' ).
+
+          " Visible columns, in this order
+          DATA(lv_pos) = 0.
+          LOOP AT VALUE string_table( ( `STATUS_ICON` )
+                                      ( `PROC_STATUS_DESC` )
+                                      ( `SOURCE_KEY` )
+                                      ( `SOURCE_TYPE_DESC` )
+                                      ( `BUKRS` )
+                                      ( `CREATE_DATE` )
+                                      ( `SOURCE_CREATED_BY` )
+                                      ( `EDOC_TYPE` )
+                                      ( `EDOC_TYPE_DESC` )
+                                      ( `VTWEG` ) ) INTO DATA(lv_colname).
+            lv_pos = lv_pos + 1.
+            lo_columns->set_column_position( columnname = CONV #( lv_colname )
+                                             position   = lv_pos ).
+          ENDLOOP.
+
+          " Technical columns hidden (still available in the layout)
+          LOOP AT VALUE string_table( ( `EDOC_GUID` )
+                                      ( `METASTATUS` )
+                                      ( `METASTATUS_TEXT` )
+                                      ( `PROC_STATUS` )
+                                      ( `PROCESS` )
+                                      ( `SOURCE_TYPE` ) ) INTO lv_colname.
+            lo_columns->get_column( CONV #( lv_colname ) )->set_visible( abap_false ).
+          ENDLOOP.
         CATCH cx_salv_not_found.
       ENDTRY.
 
