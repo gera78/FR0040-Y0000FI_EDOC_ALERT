@@ -48,6 +48,8 @@ TYPES: BEGIN OF ty_edoc,
          create_date       TYPE edocument-create_date,
          vtweg             TYPE vtweg,                    " CTASK0111324
          edoc_type         TYPE edocument-edoc_type,      " CTASK0111324
+         proc_status       TYPE edocument-proc_status,    " CTASK0111324
+         metastatus_text   TYPE val_text,                 " CTASK0111324
        END OF ty_edoc.
 
 
@@ -93,6 +95,7 @@ START-OF-SELECTION.
   PERFORM get_status_texts.
   PERFORM get_data.
   PERFORM get_channel.   " CTASK0111324
+  PERFORM fill_status_text.   " CTASK0111324
   PERFORM send_email.
   PERFORM log_data.
 
@@ -111,7 +114,8 @@ FORM get_data.
          metastatus,
 *         create_date   " CTASK0111324
          create_date,   " CTASK0111324
-         edoc_type      " CTASK0111324
+         edoc_type,     " CTASK0111324
+         proc_status    " CTASK0111324
     FROM edocument
 *    INTO TABLE @lt_edoc   " CTASK0111324
     INTO CORRESPONDING FIELDS OF TABLE @lt_edoc   " CTASK0111324
@@ -176,6 +180,21 @@ FORM get_channel.
 
   " Filter by channel (empty value "=" -> eDocuments without channel)
   DELETE lt_edoc WHERE vtweg NOT IN so_vtweg.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Text of the overall status (METASTATUS) for the ALV
+*---------------------------------------------------------------------*
+FORM fill_status_text.
+
+  LOOP AT lt_edoc ASSIGNING FIELD-SYMBOL(<ls_edoc>).
+    READ TABLE lt_status_values INTO ls_status_value
+      WITH KEY domvalue_l = <ls_edoc>-metastatus.
+    IF sy-subrc = 0.
+      <ls_edoc>-metastatus_text = ls_status_value-ddtext.
+    ENDIF.
+  ENDLOOP.
 
 ENDFORM.
 
