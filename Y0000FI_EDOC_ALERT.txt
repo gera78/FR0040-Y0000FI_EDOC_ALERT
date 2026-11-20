@@ -12,6 +12,13 @@ SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
   SELECT-OPTIONS: so_email FOR dummy_email NO INTERVALS OBLIGATORY.
   SELECT-OPTIONS: so_crdat FOR lv_credat.
   SELECT-OPTIONS: so_edoct FOR lv_edoc_type.
+* Begin of Change : CTASK0111324
+  " Distribution channel of the billing document (VBRK-VTWEG), as in
+  " EDOC_COCKPIT. eDocuments without billing document (FI postings) have
+  " no channel: select them with option "=" and an empty value
+  data lv_vtweg     type vtweg.
+  SELECT-OPTIONS: so_vtweg FOR lv_vtweg.
+* End of Change : CTASK0111324
   PARAMETERS:     p_langu  TYPE spras DEFAULT sy-langu OBLIGATORY. " CTASK0111324
 
 SELECTION-SCREEN END OF BLOCK b1.
@@ -39,6 +46,7 @@ TYPES: BEGIN OF ty_edoc,
          source_created_by TYPE edocument-source_created_by,
          metastatus        TYPE edocument-metastatus,
          create_date       TYPE edocument-create_date,
+         vtweg             TYPE vtweg,                    " CTASK0111324
        END OF ty_edoc.
 
 
@@ -83,6 +91,7 @@ START-OF-SELECTION.
 
   PERFORM get_status_texts.
   PERFORM get_data.
+  PERFORM get_channel.   " CTASK0111324
   PERFORM send_email.
   PERFORM log_data.
 
@@ -101,12 +110,94 @@ FORM get_data.
          metastatus,
          create_date
     FROM edocument
-    INTO TABLE @lt_edoc
+*    INTO TABLE @lt_edoc   " CTASK0111324
+    INTO CORRESPONDING FIELDS OF TABLE @lt_edoc   " CTASK0111324
     WHERE edoc_type   in @so_edoct
       AND metastatus <> '0001'     " NOT Completed
       AND create_date IN @so_crdat.
 
 ENDFORM.
+
+* Begin of Change : CTASK0111324
+*---------------------------------------------------------------------*
+* Distribution channel - same logic as EDOC_COCKPIT
+* (CL_EDOC_SOURCE_SD: channel read from VBRK with the Source Key)
+*   - Source Key of a billing document = billing document number
+*     (up to 10 characters) -> VBRK-VTWEG
+*   - Source Key of an accounting document (FI posting) = company code
+*     + document number + fiscal year (18 characters) -> no channel
+*   - billing document not found in VBRK -> no channel
+* Then only the eDocuments with a channel in SO_VTWEG are kept.
+*---------------------------------------------------------------------*
+FORM get_channel.
+
+  TYPES: BEGIN OF ty_vbeln,
+           vbeln TYPE vbeln_vf,
+         END OF ty_vbeln.
+
+  DATA lt_vbeln TYPE SORTED TABLE OF ty_vbeln WITH UNIQUE KEY vbeln.
+  DATA lv_vbeln TYPE vbeln_vf.
+
+  " Billing documents behind the eDocuments
+  LOOP AT lt_edoc INTO ls_edoc.
+    PERFORM source_key_to_vbeln USING ls_edoc-source_key
+                                CHANGING lv_vbeln.
+    IF lv_vbeln IS NOT INITIAL.
+      INSERT VALUE #( vbeln = lv_vbeln ) INTO TABLE lt_vbeln.
+    ENDIF.
+  ENDLOOP.
+
+  " Distribution channel from the billing document header
+  IF lt_vbeln IS NOT INITIAL.
+    SELECT vbeln, vtweg
+      FROM vbrk
+      FOR ALL ENTRIES IN @lt_vbeln
+      WHERE vbeln = @lt_vbeln-vbeln
+      INTO TABLE @DATA(lt_vbrk).
+    SORT lt_vbrk BY vbeln.
+  ENDIF.
+
+  LOOP AT lt_edoc ASSIGNING FIELD-SYMBOL(<ls_edoc>).
+    CLEAR <ls_edoc>-vtweg.
+    PERFORM source_key_to_vbeln USING <ls_edoc>-source_key
+                                CHANGING lv_vbeln.
+    IF lv_vbeln IS INITIAL.
+      CONTINUE.
+    ENDIF.
+    READ TABLE lt_vbrk INTO DATA(ls_vbrk)
+      WITH KEY vbeln = lv_vbeln BINARY SEARCH.
+    IF sy-subrc = 0.
+      <ls_edoc>-vtweg = ls_vbrk-vtweg.
+    ENDIF.
+  ENDLOOP.
+
+  " Filter by channel (empty value "=" -> eDocuments without channel)
+  DELETE lt_edoc WHERE vtweg NOT IN so_vtweg.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+* Source Key -> billing document number (empty if it cannot be one)
+*---------------------------------------------------------------------*
+FORM source_key_to_vbeln USING    iv_source_key TYPE edocument-source_key
+                         CHANGING cv_vbeln      TYPE vbeln_vf.
+
+  CLEAR cv_vbeln.
+
+  IF iv_source_key IS INITIAL OR strlen( iv_source_key ) > 10.
+    RETURN.
+  ENDIF.
+
+  cv_vbeln = iv_source_key.
+
+  CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+    EXPORTING
+      input  = cv_vbeln
+    IMPORTING
+      output = cv_vbeln.
+
+ENDFORM.
+* End of Change : CTASK0111324
 
 *---------------------------------------------------------------------*
 * Send Email
