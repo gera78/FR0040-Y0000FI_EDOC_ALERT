@@ -673,6 +673,7 @@ FORM display_alv.
           " Visible columns, in this order
           DATA(lv_pos) = 0.
           LOOP AT VALUE string_table( ( `STATUS_ICON` )
+                                      ( `EDOC_GUID` )
                                       ( `PROC_STATUS_DESC` )
                                       ( `SOURCE_KEY` )
                                       ( `SOURCE_TYPE_DESC` )
@@ -689,8 +690,7 @@ FORM display_alv.
           ENDLOOP.
 
           " Technical columns hidden (still available in the layout)
-          LOOP AT VALUE string_table( ( `EDOC_GUID` )
-                                      ( `METASTATUS` )
+          LOOP AT VALUE string_table( ( `METASTATUS` )
                                       ( `METASTATUS_TEXT` )
                                       ( `PROC_STATUS` )
                                       ( `PROCESS` )
