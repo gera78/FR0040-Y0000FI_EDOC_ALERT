@@ -57,6 +57,7 @@ TYPES: BEGIN OF ty_edoc,
          proc_status_desc  TYPE edoprocstatt-description, " CTASK0111324
          source_type_desc  TYPE edosrctypet-description,  " CTASK0111324
          edoc_type_desc    TYPE edotypet-description,     " CTASK0111324
+         create_time       TYPE edocument-create_time,    " CTASK0111324
        END OF ty_edoc.
 
 
@@ -138,7 +139,8 @@ FORM get_data.
          proc_status,   " CTASK0111324
          process,       " CTASK0111324
          source_type,   " CTASK0111324
-         bukrs          " CTASK0111324
+         bukrs,         " CTASK0111324
+         create_time    " CTASK0111324
     FROM edocument
 *    INTO TABLE @lt_edoc   " CTASK0111324
     INTO CORRESPONDING FIELDS OF TABLE @lt_edoc   " CTASK0111324
@@ -676,6 +678,7 @@ FORM display_alv.
                                       ( `SOURCE_TYPE_DESC` )
                                       ( `BUKRS` )
                                       ( `CREATE_DATE` )
+                                      ( `CREATE_TIME` )
                                       ( `SOURCE_CREATED_BY` )
                                       ( `EDOC_TYPE` )
                                       ( `EDOC_TYPE_DESC` )
