@@ -502,6 +502,12 @@ FORM display_alv.
         IMPORTING r_salv_table = DATA(lo_alv)
         CHANGING  t_table      = lt_edoc ).
 
+* Begin of Change : CTASK0111324
+      " Toolbar: export, sort, filter, totals/subtotals, layouts
+      lo_alv->get_functions( )->set_all( abap_true ).
+      lo_alv->get_columns( )->set_optimize( abap_true ).
+* End of Change : CTASK0111324
+
       lo_alv->display( ).
 
     CATCH cx_salv_msg.
