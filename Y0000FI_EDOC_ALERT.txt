@@ -41,6 +41,7 @@ CONSTANTS:
 * End of Change : CTASK0111324
 
 TYPES: BEGIN OF ty_edoc,
+         status_icon       TYPE icon_d,                   " CTASK0111324
          edoc_guid         TYPE edocument-edoc_guid,
          source_key        TYPE edocument-source_key,
          source_created_by TYPE edocument-source_created_by,
@@ -66,6 +67,18 @@ DATA:
 
   lt_status_values TYPE TABLE OF dd07v,
   ls_status_value  TYPE dd07v.
+
+* Begin of Change : CTASK0111324
+*---------------------------------------------------------------------*
+* ALV events: click on the Source Key opens the source document
+*---------------------------------------------------------------------*
+CLASS lcl_events DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS on_link_click
+      FOR EVENT link_click OF cl_salv_events_table
+      IMPORTING row column.
+ENDCLASS.
+* End of Change : CTASK0111324
 
 
 
@@ -188,12 +201,39 @@ ENDFORM.
 *---------------------------------------------------------------------*
 FORM fill_status_text.
 
+  DATA lt_status_en TYPE TABLE OF dd07v.
+
+  " Icon by the English text of the status (independent of the codes
+  " and of the logon language):
+  "   Completed -> green, Action required -> red, others -> yellow
+  CALL FUNCTION 'DD_DOMVALUES_GET'
+    EXPORTING
+      domname   = 'EDOC_METASTATUS'
+      text      = 'X'
+      langu     = 'E'
+    TABLES
+      dd07v_tab = lt_status_en.
+
   LOOP AT lt_edoc ASSIGNING FIELD-SYMBOL(<ls_edoc>).
+
     READ TABLE lt_status_values INTO ls_status_value
       WITH KEY domvalue_l = <ls_edoc>-metastatus.
     IF sy-subrc = 0.
       <ls_edoc>-metastatus_text = ls_status_value-ddtext.
     ENDIF.
+
+    <ls_edoc>-status_icon = icon_yellow_light.
+    READ TABLE lt_status_en INTO DATA(ls_status_en)
+      WITH KEY domvalue_l = <ls_edoc>-metastatus.
+    IF sy-subrc = 0.
+      DATA(lv_text_en) = to_upper( ls_status_en-ddtext ).
+      IF lv_text_en CS 'ACTION'.
+        <ls_edoc>-status_icon = icon_red_light.
+      ELSEIF lv_text_en CS 'COMPLET'.
+        <ls_edoc>-status_icon = icon_green_light.
+      ENDIF.
+    ENDIF.
+
   ENDLOOP.
 
 ENDFORM.
@@ -528,6 +568,24 @@ FORM display_alv.
       " Toolbar: export, sort, filter, totals/subtotals, layouts
       lo_alv->get_functions( )->set_all( abap_true ).
       lo_alv->get_columns( )->set_optimize( abap_true ).
+
+      " Status icon column and link (hotspot) on the Source Key
+      DATA(lo_columns) = lo_alv->get_columns( ).
+      TRY.
+          DATA(lo_col) = CAST cl_salv_column_table(
+                           lo_columns->get_column( 'STATUS_ICON' ) ).
+          lo_col->set_icon( if_salv_c_bool_sap=>true ).
+          lo_col->set_short_text( 'Status' ).
+          lo_col->set_medium_text( 'Status' ).
+          lo_col->set_long_text( 'Status' ).
+
+          lo_col = CAST cl_salv_column_table(
+                     lo_columns->get_column( 'SOURCE_KEY' ) ).
+          lo_col->set_cell_type( if_salv_c_cell_type=>hotspot ).
+        CATCH cx_salv_not_found.
+      ENDTRY.
+
+      SET HANDLER lcl_events=>on_link_click FOR lo_alv->get_event( ).
 * End of Change : CTASK0111324
 
       lo_alv->display( ).
@@ -536,3 +594,49 @@ FORM display_alv.
   ENDTRY.
 
 ENDFORM.
+
+* Begin of Change : CTASK0111324
+*---------------------------------------------------------------------*
+* Click on the Source Key:
+*   - billing document (up to 10 characters) -> VF03
+*   - accounting document (18 characters: company code + document
+*     number + fiscal year) -> FB03
+*---------------------------------------------------------------------*
+CLASS lcl_events IMPLEMENTATION.
+
+  METHOD on_link_click.
+
+    DATA lv_vbeln TYPE vbeln_vf.
+
+    IF column <> 'SOURCE_KEY'.
+      RETURN.
+    ENDIF.
+
+    READ TABLE lt_edoc INTO DATA(ls_line) INDEX row.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        IF strlen( ls_line-source_key ) = 18.
+          SET PARAMETER ID 'BUK' FIELD ls_line-source_key(4).
+          SET PARAMETER ID 'BLN' FIELD ls_line-source_key+4(10).
+          SET PARAMETER ID 'GJR' FIELD ls_line-source_key+14(4).
+          CALL TRANSACTION 'FB03' WITH AUTHORITY-CHECK AND SKIP FIRST SCREEN.
+        ELSE.
+          PERFORM source_key_to_vbeln USING ls_line-source_key
+                                      CHANGING lv_vbeln.
+          IF lv_vbeln IS INITIAL.
+            RETURN.
+          ENDIF.
+          SET PARAMETER ID 'VF' FIELD lv_vbeln.
+          CALL TRANSACTION 'VF03' WITH AUTHORITY-CHECK AND SKIP FIRST SCREEN.
+        ENDIF.
+      CATCH cx_sy_authorization_error.
+        MESSAGE 'No authorization for the transaction' TYPE 'S' DISPLAY LIKE 'E'.
+    ENDTRY.
+
+  ENDMETHOD.
+
+ENDCLASS.
+* End of Change : CTASK0111324
